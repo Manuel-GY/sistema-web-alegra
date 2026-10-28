@@ -123,3 +123,35 @@ test('el menú móvil navega sin desbordamiento de página', async ({ page }) =>
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+
+test('textos legibles y sin desbordamiento en escritorio, tablet y móvil', async ({ page }) => {
+  await page.goto('/');
+  for (const width of [1440, 1024, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => document.fonts.ready);
+    for (const selector of ['.nav-item', '.subtitle', '.btn', 'table', '.sale-number', '.stock-info strong']) {
+      const size = await page.locator(selector).first().evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+      expect(size, `${selector} a ${width}px`).toBeGreaterThanOrEqual(14);
+    }
+    const contrast = await page.locator('.subtitle').evaluate((element) => {
+      const luminance = (color) => {
+        const values = color.match(/\d+/g).slice(0, 3).map((channel) => {
+          const value = Number(channel) / 255;
+          return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+        });
+        return values[0] * .2126 + values[1] * .7152 + values[2] * .0722;
+      };
+      const foreground = luminance(getComputedStyle(element).color);
+      const background = luminance(getComputedStyle(document.documentElement).backgroundColor);
+      return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05);
+    });
+    expect(contrast).toBeGreaterThanOrEqual(4.5);
+    const labelsDoNotOverlap = await page.locator('.chart-column > small').evaluateAll((elements) => {
+      const bounds = elements.map((element) => element.getBoundingClientRect());
+      return bounds.every((rect, index) => !index || bounds[index - 1].right <= rect.left);
+    });
+    expect(labelsDoNotOverlap).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath(`legibilidad-${width}.png`), fullPage: true });
+  }
+});
